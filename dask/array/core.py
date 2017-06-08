@@ -1428,6 +1428,30 @@ class Array(Base):
     def __rxor__(self, other):
         return elemwise(operator.xor, other, self)
 
+    def __matmul__(self, other):
+        if not hasattr(other, 'ndim'):
+            other = np.asarray(other)  # account for array-like RHS
+        if other.ndim > 2:
+            msg = ('The matrix multiplication operator (@) is not yet '
+                   'implemented for higher-dimensional Dask arrays. Try '
+                   '`dask.array.tensordot` and see the discussion at '
+                   'https://github.com/dask/dask/pull/2349 for details.')
+            raise NotImplementedError(msg)
+        return tensordot(self, other, axes=((self.ndim - 1,),
+                                            (other.ndim - 2,)))
+
+    def __rmatmul__(self, other):
+        if not hasattr(other, 'ndim'):
+            other = np.asarray(other)  # account for array-like on LHS
+        if self.ndim > 2:
+            msg = ('The matrix multiplication operator (@) is not yet '
+                   'implemented for higher-dimensional Dask arrays. Try '
+                   '`dask.array.tensordot` and see the discussion at '
+                   'https://github.com/dask/dask/pull/2349 for details.')
+            raise NotImplementedError(msg)
+        return tensordot(other, self, axes=((other.ndim - 1,),
+                                            (self.ndim - 2,)))
+
     @wraps(np.any)
     def any(self, axis=None, keepdims=False, split_every=None):
         from .reductions import any
@@ -2721,7 +2745,23 @@ See the following documentation page for details:
 def where(condition, x=None, y=None):
     if x is None or y is None:
         raise TypeError(where_error_message)
-    return choose(condition, [y, x])
+
+    x = asarray(x)
+    y = asarray(y)
+
+    shape = broadcast_shapes(x.shape, y.shape)
+    dtype = np.promote_types(x.dtype, y.dtype)
+
+    x = broadcast_to(x, shape).astype(dtype)
+    y = broadcast_to(y, shape).astype(dtype)
+
+    if isinstance(condition, (bool, np.bool8)):
+        if condition:
+            return x
+        else:
+            return y
+    else:
+        return choose(condition, [y, x])
 
 
 @wraps(chunk.coarsen)
